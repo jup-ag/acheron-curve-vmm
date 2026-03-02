@@ -1,9 +1,10 @@
+use anyhow::{Result, anyhow};
 use jupiter_amm_interface::{
-    AccountProvider, Amm, AmmContext, AmmError, AmmLabel, AmmProgramIdToLabel, KeyedAccount, Quote,
-    QuoteParams, Swap, SwapAndAccountMetas, SwapMode, SwapParams,
+    AccountMap, Amm, AmmContext, AmmLabel, AmmProgramIdToLabel, KeyedAccount, Quote, QuoteParams,
+    Swap, SwapAndAccountMetas, SwapMode, SwapParams, try_get_account_data,
+    try_get_account_data_and_owner,
 };
 use rust_decimal::Decimal;
-use solana_account::ReadableAccount;
 use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 
@@ -43,7 +44,7 @@ impl ScaleSwapLeg {
         }
     }
 
-    fn from_params(params: Option<&serde_json::Value>) -> Result<Self, AmmError> {
+    fn from_params(params: Option<&serde_json::Value>) -> Result<Self> {
         let Some(params) = params else {
             return Ok(Self::default());
         };
@@ -58,7 +59,7 @@ impl ScaleSwapLeg {
         };
 
         Self::from_name(swap_name)
-            .ok_or_else(|| AmmError::from(format!("Unsupported swap leg in params: {swap_name}")))
+            .ok_or_else(|| anyhow!("Unsupported swap leg in params: {swap_name}"))
     }
 
     fn as_swap(self) -> Swap {
@@ -92,35 +93,33 @@ pub struct ScaleVmm {
 }
 
 impl ScaleVmm {
-    fn direction_for_mints(
-        &self,
-        input_mint: Pubkey,
-        output_mint: Pubkey,
-    ) -> Result<Direction, AmmError> {
+    fn direction_for_mints(&self, input_mint: Pubkey, output_mint: Pubkey) -> Result<Direction> {
         if input_mint == self.pair.mint_a && output_mint == self.pair.mint_b {
             return Ok(Direction::BuyAtoB);
         }
         if input_mint == self.pair.mint_b && output_mint == self.pair.mint_a {
             return Ok(Direction::SellBtoA);
         }
-        Err(AmmError::from(format!(
+        Err(anyhow!(
             "Scale VMM pair {} does not support mint pair {} -> {}",
-            self.key, input_mint, output_mint
-        )))
+            self.key,
+            input_mint,
+            output_mint
+        ))
     }
 
-    fn ensure_ready(&self) -> Result<(), AmmError> {
+    fn ensure_ready(&self) -> Result<()> {
         if !self.is_ready {
-            return Err(AmmError::from(
+            return Err(anyhow!(
                 "Scale VMM is not updated yet; call update before quoting/swapping",
             ));
         }
         Ok(())
     }
 
-    fn ensure_exact_in(swap_mode: SwapMode) -> Result<(), AmmError> {
+    fn ensure_exact_in(swap_mode: SwapMode) -> Result<()> {
         if swap_mode == SwapMode::ExactOut {
-            return Err(AmmError::from("Scale VMM does not support ExactOut"));
+            return Err(anyhow!("Scale VMM does not support ExactOut"));
         }
         Ok(())
     }
@@ -168,7 +167,7 @@ impl ScaleVmm {
         Decimal::from(fee_amount) / Decimal::from(base_amount)
     }
 
-    fn parse_amm_program_id(params: Option<&serde_json::Value>) -> Result<Pubkey, AmmError> {
+    fn parse_amm_program_id(params: Option<&serde_json::Value>) -> Result<Pubkey> {
         let Some(params) = params else {
             return Ok(SCALE_AMM_PROGRAM_ID);
         };
@@ -182,11 +181,9 @@ impl ScaleVmm {
             return Ok(SCALE_AMM_PROGRAM_ID);
         };
 
-        program_id_str.parse::<Pubkey>().map_err(|_| {
-            AmmError::from(format!(
-                "Invalid amm_program_id in params: {program_id_str}"
-            ))
-        })
+        program_id_str
+            .parse::<Pubkey>()
+            .map_err(|_| anyhow!("Invalid amm_program_id in params: {program_id_str}"))
     }
 }
 
@@ -195,18 +192,16 @@ impl AmmProgramIdToLabel for ScaleVmm {
 }
 
 impl Amm for ScaleVmm {
-    fn from_keyed_account(
-        keyed_account: &KeyedAccount,
-        _amm_context: &AmmContext,
-    ) -> Result<Self, AmmError>
+    fn from_keyed_account(keyed_account: &KeyedAccount, _amm_context: &AmmContext) -> Result<Self>
     where
         Self: Sized,
     {
         if keyed_account.account.owner != SCALE_VMM_PROGRAM_ID {
-            return Err(AmmError::from(format!(
+            return Err(anyhow!(
                 "Unexpected owner {} for Scale VMM pair {}",
-                keyed_account.account.owner, keyed_account.key
-            )));
+                keyed_account.account.owner,
+                keyed_account.key
+            ));
         }
 
         let pair = decode_pair_account(&keyed_account.account.data)?;
@@ -226,8 +221,8 @@ impl Amm for ScaleVmm {
         })
     }
 
-    fn label(&self) -> AmmLabel {
-        SCALE_VMM_LABEL
+    fn label(&self) -> String {
+        SCALE_VMM_LABEL.to_string()
     }
 
     fn program_id(&self) -> Pubkey {
@@ -251,39 +246,36 @@ impl Amm for ScaleVmm {
         ]
     }
 
-    fn update(&mut self, account_provider: impl AccountProvider) -> Result<(), AmmError> {
-        let pair_account = account_provider.try_get(&self.key)?;
-        self.pair = decode_pair_account(pair_account.data())?;
+    fn update(&mut self, account_map: &AccountMap) -> Result<()> {
+        self.pair = decode_pair_account(try_get_account_data(account_map, &self.key)?)?;
+        self.config = decode_platform_config_account(try_get_account_data(
+            account_map,
+            &self.config_address,
+        )?)?;
 
-        let config_account = account_provider.try_get(&self.config_address)?;
-        self.config = decode_platform_config_account(config_account.data())?;
-
-        let mint_a_account = account_provider.try_get(&self.pair.mint_a)?;
-        self.token_program_a = *mint_a_account.owner();
-
-        let mint_b_account = account_provider.try_get(&self.pair.mint_b)?;
-        self.token_program_b = *mint_b_account.owner();
+        self.token_program_a = *try_get_account_data_and_owner(account_map, &self.pair.mint_a)?.1;
+        self.token_program_b = *try_get_account_data_and_owner(account_map, &self.pair.mint_b)?.1;
 
         self.is_ready = true;
         Ok(())
     }
 
-    fn quote(&self, quote_params: &QuoteParams) -> Result<Quote, AmmError> {
+    fn quote(&self, quote_params: &QuoteParams) -> Result<Quote> {
         Self::ensure_exact_in(quote_params.swap_mode)?;
         self.ensure_ready()?;
 
         if !self.pair.enabled {
-            return Err(AmmError::from("Scale VMM pair is disabled"));
+            return Err(anyhow!("Scale VMM pair is disabled"));
         }
 
         let reserve_a_virtual = self
             .pair
             .token_a_reserves
             .checked_add(self.pair.shift)
-            .ok_or_else(|| AmmError::from("Scale VMM: math overflow"))?;
+            .ok_or_else(|| anyhow!("Scale VMM: math overflow"))?;
 
         if reserve_a_virtual == 0 || self.pair.token_b_reserves == 0 {
-            return Err(AmmError::from("Scale VMM: pool empty"));
+            return Err(anyhow!("Scale VMM: pool empty"));
         }
 
         let direction =
@@ -300,7 +292,7 @@ impl Amm for ScaleVmm {
                 let amount_after_fee = quote_params
                     .amount
                     .checked_sub(fee_breakdown.total_fee)
-                    .ok_or_else(|| AmmError::from("Scale VMM: insufficient input"))?;
+                    .ok_or_else(|| anyhow!("Scale VMM: insufficient input"))?;
                 let swap = quote_buy(
                     reserve_a_virtual,
                     self.pair.token_b_reserves,
@@ -330,7 +322,7 @@ impl Amm for ScaleVmm {
                 let amount_after_fee = swap
                     .amount_a
                     .checked_sub(fee_breakdown.total_fee)
-                    .ok_or_else(|| AmmError::from("Scale VMM: insufficient output"))?;
+                    .ok_or_else(|| anyhow!("Scale VMM: insufficient output"))?;
                 Ok(Quote {
                     in_amount: quote_params.amount,
                     out_amount: amount_after_fee,
@@ -342,10 +334,7 @@ impl Amm for ScaleVmm {
         }
     }
 
-    fn get_swap_and_account_metas(
-        &self,
-        swap_params: &SwapParams,
-    ) -> Result<SwapAndAccountMetas, AmmError> {
+    fn get_swap_and_account_metas(&self, swap_params: &SwapParams) -> Result<SwapAndAccountMetas> {
         Self::ensure_exact_in(swap_params.swap_mode)?;
         self.ensure_ready()?;
 
@@ -422,6 +411,10 @@ impl Amm for ScaleVmm {
         false
     }
 
+    fn clone_amm(&self) -> Box<dyn Amm + Send + Sync> {
+        Box::new(self.clone())
+    }
+
     fn get_accounts_len(&self) -> usize {
         22 + self.pair.fee_beneficiaries().len()
     }
@@ -433,10 +426,8 @@ impl Amm for ScaleVmm {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
-
     use borsh::BorshSerialize;
-    use jupiter_amm_interface::{Amm, AmmContext, FeeMode, KeyedAccount, QuoteParams};
+    use jupiter_amm_interface::{AccountMap, Amm, AmmContext, FeeMode, KeyedAccount, QuoteParams};
     use solana_account::Account;
     use solana_pubkey::Pubkey;
 
@@ -518,32 +509,26 @@ mod tests {
         pair_key: Pubkey,
         pair: &ScalePairState,
         config: &ScalePlatformConfig,
-    ) -> HashMap<Pubkey, Arc<Account>> {
+    ) -> AccountMap {
         let config_key = Pubkey::find_program_address(&[b"config"], &super::SCALE_VMM_PROGRAM_ID).0;
-        HashMap::from([
-            (
-                pair_key,
-                Arc::new(new_account(
-                    super::SCALE_VMM_PROGRAM_ID,
-                    encode_anchor_account("PairState", pair),
-                )),
+        let mut map = AccountMap::default();
+        map.insert(
+            pair_key,
+            new_account(
+                super::SCALE_VMM_PROGRAM_ID,
+                encode_anchor_account("PairState", pair),
             ),
-            (
-                config_key,
-                Arc::new(new_account(
-                    super::SCALE_VMM_PROGRAM_ID,
-                    encode_anchor_account("PlatformConfig", config),
-                )),
+        );
+        map.insert(
+            config_key,
+            new_account(
+                super::SCALE_VMM_PROGRAM_ID,
+                encode_anchor_account("PlatformConfig", config),
             ),
-            (
-                pair.mint_a,
-                Arc::new(new_account(SPL_TOKEN_PROGRAM_ID, Vec::new())),
-            ),
-            (
-                pair.mint_b,
-                Arc::new(new_account(SPL_TOKEN_PROGRAM_ID, Vec::new())),
-            ),
-        ])
+        );
+        map.insert(pair.mint_a, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
+        map.insert(pair.mint_b, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
+        map
     }
 
     #[test]

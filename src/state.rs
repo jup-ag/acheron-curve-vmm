@@ -1,5 +1,5 @@
+use anyhow::{Result, anyhow};
 use borsh::{BorshDeserialize, BorshSerialize};
-use jupiter_amm_interface::AmmError;
 use sha2::{Digest, Sha256};
 use solana_pubkey::Pubkey;
 
@@ -61,32 +61,26 @@ pub fn anchor_discriminator(namespace: &str, name: &str) -> [u8; 8] {
     out
 }
 
-fn decode_anchor_account<T: BorshDeserialize>(
-    account_name: &str,
-    data: &[u8],
-) -> Result<T, AmmError> {
+fn decode_anchor_account<T: BorshDeserialize>(account_name: &str, data: &[u8]) -> Result<T> {
     if data.len() < 8 {
-        return Err(AmmError::from(format!(
+        return Err(anyhow!(
             "Scale VMM account {account_name} data is too short"
-        )));
+        ));
     }
     let expected = anchor_discriminator("account", account_name);
     if data[..8] != expected {
-        return Err(AmmError::from(format!(
+        return Err(anyhow!(
             "Invalid discriminator for Scale VMM account {account_name}"
-        )));
+        ));
     }
-    T::try_from_slice(&data[8..]).map_err(|e| {
-        AmmError::from(format!(
-            "Failed to decode Scale VMM account {account_name}: {e}"
-        ))
-    })
+    T::try_from_slice(&data[8..])
+        .map_err(|e| anyhow!("Failed to decode Scale VMM account {account_name}: {e}"))
 }
 
-pub fn decode_pair_account(data: &[u8]) -> Result<ScalePairState, AmmError> {
+pub fn decode_pair_account(data: &[u8]) -> Result<ScalePairState> {
     decode_anchor_account("PairState", data)
 }
 
-pub fn decode_platform_config_account(data: &[u8]) -> Result<ScalePlatformConfig, AmmError> {
+pub fn decode_platform_config_account(data: &[u8]) -> Result<ScalePlatformConfig> {
     decode_anchor_account("PlatformConfig", data)
 }
