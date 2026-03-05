@@ -384,9 +384,6 @@ impl Amm for ScaleVmm {
         account_metas.push(AccountMeta::new(amm_vault_a, false));
         account_metas.push(AccountMeta::new(amm_vault_b, false));
         account_metas.push(AccountMeta::new_readonly(amm_config, false));
-        account_metas.push(AccountMeta::new_readonly(self.token_program_a, false));
-        account_metas.push(AccountMeta::new_readonly(self.token_program_b, false));
-
         for beneficiary in self.pair.fee_beneficiaries() {
             let beneficiary_ata = Self::get_ata(
                 &beneficiary.wallet,
@@ -415,7 +412,7 @@ impl Amm for ScaleVmm {
     }
 
     fn get_accounts_len(&self) -> usize {
-        21 + self.pair.fee_beneficiaries().len()
+        19 + self.pair.fee_beneficiaries().len()
     }
 
     fn is_active(&self) -> bool {
@@ -679,7 +676,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(swap.swap, jupiter_amm_interface::Swap::TokenSwap);
-        assert_eq!(swap.account_metas.len(), 23);
+        assert_eq!(swap.account_metas.len(), 21);
         assert_eq!(swap.account_metas[0].pubkey, super::SCALE_VMM_PROGRAM_ID);
         assert_eq!(swap.account_metas[1].pubkey, pair_key);
         assert!(swap.account_metas[1].is_writable);
@@ -724,8 +721,8 @@ mod tests {
                 &super::ASSOCIATED_TOKEN_PROGRAM_ID,
             )
             .0;
-            assert_eq!(swap.account_metas[21 + index].pubkey, expected_ata);
-            assert!(swap.account_metas[21 + index].is_writable);
+            assert_eq!(swap.account_metas[19 + index].pubkey, expected_ata);
+            assert!(swap.account_metas[19 + index].is_writable);
         }
     }
 
