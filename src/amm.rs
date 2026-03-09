@@ -368,7 +368,7 @@ impl Amm for ScaleVmm {
         account_metas.push(AccountMeta::new_readonly(SCALE_VMM_PROGRAM_ID, false));
         account_metas.push(AccountMeta::new(self.key, false));
         account_metas.push(AccountMeta::new(swap_params.token_transfer_authority, true));
-        account_metas.push(AccountMeta::new(self.pair.mint_a, false));
+        account_metas.push(AccountMeta::new_readonly(self.pair.mint_a, false));
         account_metas.push(AccountMeta::new_readonly(self.pair.mint_b, false));
         account_metas.push(AccountMeta::new(user_ta_a, false));
         account_metas.push(AccountMeta::new(user_ta_b, false));
