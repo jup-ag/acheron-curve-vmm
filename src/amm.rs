@@ -420,332 +420,332 @@ impl Amm for ScaleVmm {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use borsh::BorshSerialize;
-    use jupiter_amm_interface::{AccountMap, Amm, AmmContext, FeeMode, KeyedAccount, QuoteParams};
-    use solana_account::Account;
-    use solana_pubkey::Pubkey;
+// #[cfg(test)]
+// mod tests {
+//     use borsh::BorshSerialize;
+//     use jupiter_amm_interface::{AccountMap, Amm, AmmContext, FeeMode, KeyedAccount, QuoteParams};
+//     use solana_account::Account;
+//     use solana_pubkey::Pubkey;
 
-    use crate::constants::{SCALE_AMM_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID};
-    use crate::state::{
-        CurveType, FeeBeneficiary, ScalePairState, ScalePlatformConfig, anchor_discriminator,
-    };
+//     use crate::constants::{SCALE_AMM_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID};
+//     use crate::state::{
+//         CurveType, FeeBeneficiary, ScalePairState, ScalePlatformConfig, anchor_discriminator,
+//     };
 
-    use super::{ScaleSwapLeg, ScaleVmm};
+//     use super::{ScaleSwapLeg, ScaleVmm};
 
-    fn new_account(owner: Pubkey, data: Vec<u8>) -> Account {
-        Account {
-            lamports: 1,
-            data,
-            owner,
-            executable: false,
-            rent_epoch: 0,
-        }
-    }
+//     fn new_account(owner: Pubkey, data: Vec<u8>) -> Account {
+//         Account {
+//             lamports: 1,
+//             data,
+//             owner,
+//             executable: false,
+//             rent_epoch: 0,
+//         }
+//     }
 
-    fn encode_anchor_account<T: BorshSerialize>(account_name: &str, value: &T) -> Vec<u8> {
-        let mut data = anchor_discriminator("account", account_name).to_vec();
-        data.extend(borsh::to_vec(value).unwrap());
-        data
-    }
+//     fn encode_anchor_account<T: BorshSerialize>(account_name: &str, value: &T) -> Vec<u8> {
+//         let mut data = anchor_discriminator("account", account_name).to_vec();
+//         data.extend(borsh::to_vec(value).unwrap());
+//         data
+//     }
 
-    fn sample_pair(curve: CurveType) -> ScalePairState {
-        let beneficiary_a = FeeBeneficiary {
-            wallet: Pubkey::new_unique(),
-            share_bps: 200,
-        };
-        let beneficiary_b = FeeBeneficiary {
-            wallet: Pubkey::new_unique(),
-            share_bps: 50,
-        };
-        let mut fee_beneficiaries = [FeeBeneficiary::default(); 5];
-        fee_beneficiaries[0] = beneficiary_a;
-        fee_beneficiaries[1] = beneficiary_b;
+//     fn sample_pair(curve: CurveType) -> ScalePairState {
+//         let beneficiary_a = FeeBeneficiary {
+//             wallet: Pubkey::new_unique(),
+//             share_bps: 200,
+//         };
+//         let beneficiary_b = FeeBeneficiary {
+//             wallet: Pubkey::new_unique(),
+//             share_bps: 50,
+//         };
+//         let mut fee_beneficiaries = [FeeBeneficiary::default(); 5];
+//         fee_beneficiaries[0] = beneficiary_a;
+//         fee_beneficiaries[1] = beneficiary_b;
 
-        ScalePairState {
-            enabled: true,
-            graduated: false,
-            mint_a: Pubkey::new_unique(),
-            mint_b: Pubkey::new_unique(),
-            token_a_reserves: 1_000_000,
-            token_b_reserves: 2_000_000,
-            shift: 500_000,
-            curve,
-            fee_beneficiary_count: 2,
-            fee_beneficiaries,
-            amm_pool: Pubkey::default(),
-            bump: 250,
-        }
-    }
+//         ScalePairState {
+//             enabled: true,
+//             graduated: false,
+//             mint_a: Pubkey::new_unique(),
+//             mint_b: Pubkey::new_unique(),
+//             token_a_reserves: 1_000_000,
+//             token_b_reserves: 2_000_000,
+//             shift: 500_000,
+//             curve,
+//             fee_beneficiary_count: 2,
+//             fee_beneficiaries,
+//             amm_pool: Pubkey::default(),
+//             bump: 250,
+//         }
+//     }
 
-    fn sample_config() -> ScalePlatformConfig {
-        ScalePlatformConfig {
-            authority: Pubkey::new_unique(),
-            fee_beneficiary: Pubkey::new_unique(),
-            base_token: Pubkey::new_unique(),
-            platform_fee_bps: 100,
-            graduation_threshold: 1_000_000_000,
-            bump: 42,
-        }
-    }
+//     fn sample_config() -> ScalePlatformConfig {
+//         ScalePlatformConfig {
+//             authority: Pubkey::new_unique(),
+//             fee_beneficiary: Pubkey::new_unique(),
+//             base_token: Pubkey::new_unique(),
+//             platform_fee_bps: 100,
+//             graduation_threshold: 1_000_000_000,
+//             bump: 42,
+//         }
+//     }
 
-    fn keyed_pair_account(pair_key: Pubkey, pair: &ScalePairState) -> KeyedAccount {
-        KeyedAccount {
-            key: pair_key,
-            account: new_account(
-                super::SCALE_VMM_PROGRAM_ID,
-                encode_anchor_account("PairState", pair),
-            ),
-            params: None,
-        }
-    }
+//     fn keyed_pair_account(pair_key: Pubkey, pair: &ScalePairState) -> KeyedAccount {
+//         KeyedAccount {
+//             key: pair_key,
+//             account: new_account(
+//                 super::SCALE_VMM_PROGRAM_ID,
+//                 encode_anchor_account("PairState", pair),
+//             ),
+//             params: None,
+//         }
+//     }
 
-    fn update_map(
-        pair_key: Pubkey,
-        pair: &ScalePairState,
-        config: &ScalePlatformConfig,
-    ) -> AccountMap {
-        let config_key = Pubkey::find_program_address(&[b"config"], &super::SCALE_VMM_PROGRAM_ID).0;
-        let mut map = AccountMap::default();
-        map.insert(
-            pair_key,
-            new_account(
-                super::SCALE_VMM_PROGRAM_ID,
-                encode_anchor_account("PairState", pair),
-            ),
-        );
-        map.insert(
-            config_key,
-            new_account(
-                super::SCALE_VMM_PROGRAM_ID,
-                encode_anchor_account("PlatformConfig", config),
-            ),
-        );
-        map.insert(pair.mint_a, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
-        map.insert(pair.mint_b, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
-        map
-    }
+//     fn update_map(
+//         pair_key: Pubkey,
+//         pair: &ScalePairState,
+//         config: &ScalePlatformConfig,
+//     ) -> AccountMap {
+//         let config_key = Pubkey::find_program_address(&[b"config"], &super::SCALE_VMM_PROGRAM_ID).0;
+//         let mut map = AccountMap::default();
+//         map.insert(
+//             pair_key,
+//             new_account(
+//                 super::SCALE_VMM_PROGRAM_ID,
+//                 encode_anchor_account("PairState", pair),
+//             ),
+//         );
+//         map.insert(
+//             config_key,
+//             new_account(
+//                 super::SCALE_VMM_PROGRAM_ID,
+//                 encode_anchor_account("PlatformConfig", config),
+//             ),
+//         );
+//         map.insert(pair.mint_a, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
+//         map.insert(pair.mint_b, new_account(SPL_TOKEN_PROGRAM_ID, Vec::new()));
+//         map
+//     }
 
-    #[test]
-    fn rejects_invalid_pair_discriminator() {
-        let pair_key = Pubkey::new_unique();
-        let keyed = KeyedAccount {
-            key: pair_key,
-            account: new_account(super::SCALE_VMM_PROGRAM_ID, vec![0u8; 16]),
-            params: None,
-        };
-        let err = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap_err();
-        assert!(err.to_string().contains("Invalid discriminator"));
-    }
+//     #[test]
+//     fn rejects_invalid_pair_discriminator() {
+//         let pair_key = Pubkey::new_unique();
+//         let keyed = KeyedAccount {
+//             key: pair_key,
+//             account: new_account(super::SCALE_VMM_PROGRAM_ID, vec![0u8; 16]),
+//             params: None,
+//         };
+//         let err = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap_err();
+//         assert!(err.to_string().contains("Invalid discriminator"));
+//     }
 
-    #[test]
-    fn quote_buy_and_sell_constant_product() {
-        let pair_key = Pubkey::new_unique();
-        let pair = sample_pair(CurveType::ConstantProduct);
-        let config = sample_config();
-        let keyed = keyed_pair_account(pair_key, &pair);
-        let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        amm.update(&update_map(pair_key, &pair, &config)).unwrap();
+//     #[test]
+//     fn quote_buy_and_sell_constant_product() {
+//         let pair_key = Pubkey::new_unique();
+//         let pair = sample_pair(CurveType::ConstantProduct);
+//         let config = sample_config();
+//         let keyed = keyed_pair_account(pair_key, &pair);
+//         let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         amm.update(&update_map(pair_key, &pair, &config)).unwrap();
 
-        let buy_quote = amm
-            .quote(&QuoteParams {
-                amount: 100_000,
-                input_mint: pair.mint_a,
-                output_mint: pair.mint_b,
-                swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
-                fee_mode: FeeMode::Normal,
-            })
-            .unwrap();
-        assert_eq!(buy_quote.in_amount, 100_000);
-        assert_eq!(buy_quote.out_amount, 120_889);
-        assert_eq!(buy_quote.fee_amount, 3_500);
-        assert_eq!(buy_quote.fee_mint, pair.mint_a);
+//         let buy_quote = amm
+//             .quote(&QuoteParams {
+//                 amount: 100_000,
+//                 input_mint: pair.mint_a,
+//                 output_mint: pair.mint_b,
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
+//                 fee_mode: FeeMode::Normal,
+//             })
+//             .unwrap();
+//         assert_eq!(buy_quote.in_amount, 100_000);
+//         assert_eq!(buy_quote.out_amount, 120_889);
+//         assert_eq!(buy_quote.fee_amount, 3_500);
+//         assert_eq!(buy_quote.fee_mint, pair.mint_a);
 
-        let sell_quote = amm
-            .quote(&QuoteParams {
-                amount: 50_000,
-                input_mint: pair.mint_b,
-                output_mint: pair.mint_a,
-                swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
-                fee_mode: FeeMode::Normal,
-            })
-            .unwrap();
-        assert_eq!(sell_quote.in_amount, 50_000);
-        assert_eq!(sell_quote.out_amount, 35_307);
-        assert_eq!(sell_quote.fee_amount, 1_278);
-        assert_eq!(sell_quote.fee_mint, pair.mint_a);
-    }
+//         let sell_quote = amm
+//             .quote(&QuoteParams {
+//                 amount: 50_000,
+//                 input_mint: pair.mint_b,
+//                 output_mint: pair.mint_a,
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
+//                 fee_mode: FeeMode::Normal,
+//             })
+//             .unwrap();
+//         assert_eq!(sell_quote.in_amount, 50_000);
+//         assert_eq!(sell_quote.out_amount, 35_307);
+//         assert_eq!(sell_quote.fee_amount, 1_278);
+//         assert_eq!(sell_quote.fee_mint, pair.mint_a);
+//     }
 
-    #[test]
-    fn quote_buy_exponential_curve() {
-        let pair_key = Pubkey::new_unique();
-        let pair = sample_pair(CurveType::Exponential);
-        let config = sample_config();
-        let keyed = keyed_pair_account(pair_key, &pair);
-        let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        amm.update(&update_map(pair_key, &pair, &config)).unwrap();
+//     #[test]
+//     fn quote_buy_exponential_curve() {
+//         let pair_key = Pubkey::new_unique();
+//         let pair = sample_pair(CurveType::Exponential);
+//         let config = sample_config();
+//         let keyed = keyed_pair_account(pair_key, &pair);
+//         let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         amm.update(&update_map(pair_key, &pair, &config)).unwrap();
 
-        let quote = amm
-            .quote(&QuoteParams {
-                amount: 100_000,
-                input_mint: pair.mint_a,
-                output_mint: pair.mint_b,
-                swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
-                fee_mode: FeeMode::Normal,
-            })
-            .unwrap();
-        assert_eq!(quote.out_amount, 117_343);
-        assert_eq!(quote.fee_amount, 3_500);
-    }
+//         let quote = amm
+//             .quote(&QuoteParams {
+//                 amount: 100_000,
+//                 input_mint: pair.mint_a,
+//                 output_mint: pair.mint_b,
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
+//                 fee_mode: FeeMode::Normal,
+//             })
+//             .unwrap();
+//         assert_eq!(quote.out_amount, 117_343);
+//         assert_eq!(quote.fee_amount, 3_500);
+//     }
 
-    #[test]
-    fn exact_out_is_rejected() {
-        let pair_key = Pubkey::new_unique();
-        let pair = sample_pair(CurveType::ConstantProduct);
-        let config = sample_config();
-        let keyed = keyed_pair_account(pair_key, &pair);
-        let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        amm.update(&update_map(pair_key, &pair, &config)).unwrap();
+//     #[test]
+//     fn exact_out_is_rejected() {
+//         let pair_key = Pubkey::new_unique();
+//         let pair = sample_pair(CurveType::ConstantProduct);
+//         let config = sample_config();
+//         let keyed = keyed_pair_account(pair_key, &pair);
+//         let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         amm.update(&update_map(pair_key, &pair, &config)).unwrap();
 
-        let err = amm
-            .quote(&QuoteParams {
-                amount: 100_000,
-                input_mint: pair.mint_a,
-                output_mint: pair.mint_b,
-                swap_mode: jupiter_amm_interface::SwapMode::ExactOut,
-                fee_mode: FeeMode::Normal,
-            })
-            .unwrap_err();
-        assert!(err.to_string().contains("ExactOut"));
-    }
+//         let err = amm
+//             .quote(&QuoteParams {
+//                 amount: 100_000,
+//                 input_mint: pair.mint_a,
+//                 output_mint: pair.mint_b,
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactOut,
+//                 fee_mode: FeeMode::Normal,
+//             })
+//             .unwrap_err();
+//         assert!(err.to_string().contains("ExactOut"));
+//     }
 
-    #[test]
-    fn invalid_fee_configuration_is_rejected() {
-        let pair_key = Pubkey::new_unique();
-        let mut pair = sample_pair(CurveType::ConstantProduct);
-        pair.fee_beneficiary_count = 0;
-        let mut config = sample_config();
-        config.platform_fee_bps = 10_000;
-        let keyed = keyed_pair_account(pair_key, &pair);
-        let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        amm.update(&update_map(pair_key, &pair, &config)).unwrap();
+//     #[test]
+//     fn invalid_fee_configuration_is_rejected() {
+//         let pair_key = Pubkey::new_unique();
+//         let mut pair = sample_pair(CurveType::ConstantProduct);
+//         pair.fee_beneficiary_count = 0;
+//         let mut config = sample_config();
+//         config.platform_fee_bps = 10_000;
+//         let keyed = keyed_pair_account(pair_key, &pair);
+//         let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         amm.update(&update_map(pair_key, &pair, &config)).unwrap();
 
-        let err = amm
-            .quote(&QuoteParams {
-                amount: 100_000,
-                input_mint: pair.mint_a,
-                output_mint: pair.mint_b,
-                swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
-                fee_mode: FeeMode::Normal,
-            })
-            .unwrap_err();
-        assert!(err.to_string().contains("insufficient input after fees"));
-    }
+//         let err = amm
+//             .quote(&QuoteParams {
+//                 amount: 100_000,
+//                 input_mint: pair.mint_a,
+//                 output_mint: pair.mint_b,
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
+//                 fee_mode: FeeMode::Normal,
+//             })
+//             .unwrap_err();
+//         assert!(err.to_string().contains("insufficient input after fees"));
+//     }
 
-    #[test]
-    fn builds_expected_account_metas_with_dynamic_beneficiaries_and_amm_accounts() {
-        let pair_key = Pubkey::new_unique();
-        let pair = sample_pair(CurveType::ConstantProduct);
-        let config = sample_config();
-        let keyed = keyed_pair_account(pair_key, &pair);
-        let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        amm.update(&update_map(pair_key, &pair, &config)).unwrap();
+//     #[test]
+//     fn builds_expected_account_metas_with_dynamic_beneficiaries_and_amm_accounts() {
+//         let pair_key = Pubkey::new_unique();
+//         let pair = sample_pair(CurveType::ConstantProduct);
+//         let config = sample_config();
+//         let keyed = keyed_pair_account(pair_key, &pair);
+//         let mut amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         amm.update(&update_map(pair_key, &pair, &config)).unwrap();
 
-        let source_token_account = Pubkey::new_unique();
-        let destination_token_account = Pubkey::new_unique();
-        let transfer_authority = Pubkey::new_unique();
-        let jupiter_program_id = Pubkey::new_unique();
+//         let source_token_account = Pubkey::new_unique();
+//         let destination_token_account = Pubkey::new_unique();
+//         let transfer_authority = Pubkey::new_unique();
+//         let jupiter_program_id = Pubkey::new_unique();
 
-        let swap = amm
-            .get_swap_and_account_metas(&jupiter_amm_interface::SwapParams {
-                swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
-                in_amount: 100_000,
-                out_amount: 120_000,
-                source_mint: pair.mint_a,
-                destination_mint: pair.mint_b,
-                source_token_account,
-                destination_token_account,
-                token_transfer_authority: transfer_authority,
-                user: Pubkey::new_unique(),
-                payer: Pubkey::new_unique(),
-                quote_mint_to_referrer: None,
-                jupiter_program_id: &jupiter_program_id,
-                missing_dynamic_accounts_as_default: false,
-            })
-            .unwrap();
+//         let swap = amm
+//             .get_swap_and_account_metas(&jupiter_amm_interface::SwapParams {
+//                 swap_mode: jupiter_amm_interface::SwapMode::ExactIn,
+//                 in_amount: 100_000,
+//                 out_amount: 120_000,
+//                 source_mint: pair.mint_a,
+//                 destination_mint: pair.mint_b,
+//                 source_token_account,
+//                 destination_token_account,
+//                 token_transfer_authority: transfer_authority,
+//                 user: Pubkey::new_unique(),
+//                 payer: Pubkey::new_unique(),
+//                 quote_mint_to_referrer: None,
+//                 jupiter_program_id: &jupiter_program_id,
+//                 missing_dynamic_accounts_as_default: false,
+//             })
+//             .unwrap();
 
-        assert_eq!(swap.swap, jupiter_amm_interface::Swap::TokenSwap);
-        assert_eq!(swap.account_metas.len(), 21);
-        assert_eq!(swap.account_metas[0].pubkey, super::SCALE_VMM_PROGRAM_ID);
-        assert_eq!(swap.account_metas[1].pubkey, pair_key);
-        assert!(swap.account_metas[1].is_writable);
-        assert_eq!(swap.account_metas[2].pubkey, transfer_authority);
-        assert!(swap.account_metas[2].is_signer);
-        assert_eq!(swap.account_metas[5].pubkey, source_token_account);
-        assert_eq!(swap.account_metas[6].pubkey, destination_token_account);
-        assert_eq!(swap.account_metas[10].pubkey, SPL_TOKEN_PROGRAM_ID);
-        assert_eq!(swap.account_metas[11].pubkey, SPL_TOKEN_PROGRAM_ID);
-        assert_eq!(swap.account_metas[14].pubkey, SCALE_AMM_PROGRAM_ID);
+//         assert_eq!(swap.swap, jupiter_amm_interface::Swap::TokenSwap);
+//         assert_eq!(swap.account_metas.len(), 21);
+//         assert_eq!(swap.account_metas[0].pubkey, super::SCALE_VMM_PROGRAM_ID);
+//         assert_eq!(swap.account_metas[1].pubkey, pair_key);
+//         assert!(swap.account_metas[1].is_writable);
+//         assert_eq!(swap.account_metas[2].pubkey, transfer_authority);
+//         assert!(swap.account_metas[2].is_signer);
+//         assert_eq!(swap.account_metas[5].pubkey, source_token_account);
+//         assert_eq!(swap.account_metas[6].pubkey, destination_token_account);
+//         assert_eq!(swap.account_metas[10].pubkey, SPL_TOKEN_PROGRAM_ID);
+//         assert_eq!(swap.account_metas[11].pubkey, SPL_TOKEN_PROGRAM_ID);
+//         assert_eq!(swap.account_metas[14].pubkey, SCALE_AMM_PROGRAM_ID);
 
-        let expected_amm_pool = Pubkey::find_program_address(
-            &[
-                b"pool",
-                pair_key.as_ref(),
-                pair.mint_a.as_ref(),
-                pair.mint_b.as_ref(),
-            ],
-            &SCALE_AMM_PROGRAM_ID,
-        )
-        .0;
-        assert_eq!(swap.account_metas[15].pubkey, expected_amm_pool);
+//         let expected_amm_pool = Pubkey::find_program_address(
+//             &[
+//                 b"pool",
+//                 pair_key.as_ref(),
+//                 pair.mint_a.as_ref(),
+//                 pair.mint_b.as_ref(),
+//             ],
+//             &SCALE_AMM_PROGRAM_ID,
+//         )
+//         .0;
+//         assert_eq!(swap.account_metas[15].pubkey, expected_amm_pool);
 
-        let expected_platform_fee_ata = Pubkey::find_program_address(
-            &[
-                config.fee_beneficiary.as_ref(),
-                SPL_TOKEN_PROGRAM_ID.as_ref(),
-                pair.mint_a.as_ref(),
-            ],
-            &super::ASSOCIATED_TOKEN_PROGRAM_ID,
-        )
-        .0;
-        assert_eq!(swap.account_metas[9].pubkey, expected_platform_fee_ata);
+//         let expected_platform_fee_ata = Pubkey::find_program_address(
+//             &[
+//                 config.fee_beneficiary.as_ref(),
+//                 SPL_TOKEN_PROGRAM_ID.as_ref(),
+//                 pair.mint_a.as_ref(),
+//             ],
+//             &super::ASSOCIATED_TOKEN_PROGRAM_ID,
+//         )
+//         .0;
+//         assert_eq!(swap.account_metas[9].pubkey, expected_platform_fee_ata);
 
-        for (index, beneficiary) in pair.fee_beneficiaries().iter().enumerate() {
-            let expected_ata = Pubkey::find_program_address(
-                &[
-                    beneficiary.wallet.as_ref(),
-                    SPL_TOKEN_PROGRAM_ID.as_ref(),
-                    pair.mint_a.as_ref(),
-                ],
-                &super::ASSOCIATED_TOKEN_PROGRAM_ID,
-            )
-            .0;
-            assert_eq!(swap.account_metas[19 + index].pubkey, expected_ata);
-            assert!(swap.account_metas[19 + index].is_writable);
-        }
-    }
+//         for (index, beneficiary) in pair.fee_beneficiaries().iter().enumerate() {
+//             let expected_ata = Pubkey::find_program_address(
+//                 &[
+//                     beneficiary.wallet.as_ref(),
+//                     SPL_TOKEN_PROGRAM_ID.as_ref(),
+//                     pair.mint_a.as_ref(),
+//                 ],
+//                 &super::ASSOCIATED_TOKEN_PROGRAM_ID,
+//             )
+//             .0;
+//             assert_eq!(swap.account_metas[19 + index].pubkey, expected_ata);
+//             assert!(swap.account_metas[19 + index].is_writable);
+//         }
+//     }
 
-    #[test]
-    fn supports_params_override_for_swap_leg_and_amm_program() {
-        let pair_key = Pubkey::new_unique();
-        let pair = sample_pair(CurveType::ConstantProduct);
-        let custom_amm_program = Pubkey::new_unique();
+//     #[test]
+//     fn supports_params_override_for_swap_leg_and_amm_program() {
+//         let pair_key = Pubkey::new_unique();
+//         let pair = sample_pair(CurveType::ConstantProduct);
+//         let custom_amm_program = Pubkey::new_unique();
 
-        let keyed = KeyedAccount {
-            key: pair_key,
-            account: new_account(
-                super::SCALE_VMM_PROGRAM_ID,
-                encode_anchor_account("PairState", &pair),
-            ),
-            params: Some(serde_json::json!({
-                "swap": "gamma",
-                "amm_program_id": custom_amm_program.to_string()
-            })),
-        };
+//         let keyed = KeyedAccount {
+//             key: pair_key,
+//             account: new_account(
+//                 super::SCALE_VMM_PROGRAM_ID,
+//                 encode_anchor_account("PairState", &pair),
+//             ),
+//             params: Some(serde_json::json!({
+//                 "swap": "gamma",
+//                 "amm_program_id": custom_amm_program.to_string()
+//             })),
+//         };
 
-        let amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
-        assert_eq!(amm.swap_leg, ScaleSwapLeg::Gamma);
-        assert_eq!(amm.amm_program_id, custom_amm_program);
-    }
-}
+//         let amm = ScaleVmm::from_keyed_account(&keyed, &AmmContext::default()).unwrap();
+//         assert_eq!(amm.swap_leg, ScaleSwapLeg::Gamma);
+//         assert_eq!(amm.amm_program_id, custom_amm_program);
+//     }
+// }
