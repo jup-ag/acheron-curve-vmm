@@ -9,7 +9,7 @@ license = "Apache-2.0"
 jupiter-amm-interface = "0.6.1"
 anyhow = "1"
 borsh = { version = "1.5.7", features = ["derive"] }
-rust_decimal = "=1.36.0"
+rust_decimal = "1.36.0"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.117"
 sha2 = "0.10.9"
