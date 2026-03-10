@@ -1,6 +1,6 @@
 mod amm;
 mod constants;
-mod math;
+pub mod math;
 mod state;
 
 pub use amm::{ScaleSwapLeg, ScaleVmm};
