@@ -17,19 +17,14 @@ use crate::state::{
     ScalePairState, ScalePlatformConfig, decode_pair_account, decode_platform_config_account,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ScaleSwapLeg {
+    #[default]
     TokenSwap,
     Gamma,
     MeteoraDammV2,
     Obsidian,
     RaydiumV2,
-}
-
-impl Default for ScaleSwapLeg {
-    fn default() -> Self {
-        Self::TokenSwap
-    }
 }
 
 impl ScaleSwapLeg {
